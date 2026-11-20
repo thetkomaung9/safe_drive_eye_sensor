@@ -9,9 +9,9 @@ from drowsiness import DrowsinessJudge
 from alarm import Alarm
 from database import EventDB
 
-LIMIT_SEC = 2.0   # 눈이 이 시간 이상 안 보이면 졸음으로 판단 (실험으로 조정)
-PULL_OVER_SEC = 5.0
-REPEAT_WINDOW_SEC = 60.0
+LIMIT_SEC = 1.0   # 눈이 이 시간 이상 안 보이면 졸음으로 판단 (실험으로 조정)
+PULL_OVER_SEC = 2.5  # 눈이 이 시간 이상 안 보이면 졸음으로 판단하고 안전하게 정차하도록 경고 (실험으로 조정)
+REPEAT_WINDOW_SEC = 30.0
 REPEAT_EVENT_LIMIT = 3
 
 
