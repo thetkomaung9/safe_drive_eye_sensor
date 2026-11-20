@@ -8,6 +8,8 @@ def now():
 
 
 class EventDB:
+    ALERT_LEVELS = ("WARNING", "PULL_OVER")
+
     def __init__(self, path="drowsiness.db"):
         self.conn = sqlite3.connect(path)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS sessions(
@@ -15,7 +17,19 @@ class EventDB:
         self.conn.execute("""CREATE TABLE IF NOT EXISTS events(
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER,
             time TEXT, event_type TEXT, closed_sec REAL,
+            alert_level TEXT CHECK(
+                alert_level IS NULL OR alert_level IN ('WARNING', 'PULL_OVER')
+            ),
             FOREIGN KEY(session_id) REFERENCES sessions(id))""")
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(events)")}
+        if "alert_level" not in columns:
+            self.conn.execute("ALTER TABLE events ADD COLUMN alert_level TEXT")
+        self.conn.execute(
+            """UPDATE events
+               SET alert_level = event_type
+               WHERE alert_level IS NULL AND event_type IN (?, ?)""",
+            self.ALERT_LEVELS,
+        )
         self.conn.commit()
 
     def start_session(self):
@@ -27,10 +41,16 @@ class EventDB:
         self.conn.execute("UPDATE sessions SET end_time=? WHERE id=?", (now(), session_id))
         self.conn.commit()
 
-    def log_event(self, session_id, event_type, closed_sec):
+    def log_event(self, session_id, event_type, closed_sec, alert_level=None):
+        if alert_level is not None and alert_level not in self.ALERT_LEVELS:
+            raise ValueError(
+                f"alert_level must be one of {self.ALERT_LEVELS}, got {alert_level!r}"
+            )
         self.conn.execute(
-            "INSERT INTO events(session_id, time, event_type, closed_sec) VALUES(?,?,?,?)",
-            (session_id, now(), event_type, round(closed_sec, 2)))
+            """INSERT INTO events(
+                session_id, time, event_type, closed_sec, alert_level
+            ) VALUES(?,?,?,?,?)""",
+            (session_id, now(), event_type, round(closed_sec, 2), alert_level))
         self.conn.commit()
 
     def session_summary(self):
@@ -40,9 +60,24 @@ class EventDB:
             FROM sessions s LEFT JOIN events e ON e.session_id = s.id
             GROUP BY s.id ORDER BY s.id DESC""").fetchall()
 
-    def recent_events(self, limit=10):
+    def alert_summary(self):
+        """Return total drowsy, warning, pull-over, and longest duration counts."""
+        return self.conn.execute("""
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN alert_level = 'WARNING' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN alert_level = 'PULL_OVER' THEN 1 ELSE 0 END), 0),
+                COALESCE(MAX(closed_sec), 0)
+            FROM events
+            WHERE event_type = 'DROWSY'
+        """).fetchone()
+
+    def recent_events(self, limit=10, include_alert_level=False):
+        columns = "session_id, time, event_type, closed_sec"
+        if include_alert_level:
+            columns += ", alert_level"
         return self.conn.execute(
-            "SELECT session_id, time, event_type, closed_sec FROM events ORDER BY id DESC LIMIT ?",
+            f"SELECT {columns} FROM events ORDER BY id DESC LIMIT ?",
             (limit,)).fetchall()
 
     def close(self):
